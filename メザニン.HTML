@@ -2,18 +2,19 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>3D Rack Simulator - Full Span Snap Version</title>
+    <title>3D Rack Simulator - Direct Input Fix</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; }
         #ui-panel { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 8px; border-left: 5px solid #00ffcc; z-index: 100; pointer-events: none; }
-        .dim-tag { position: absolute; background: #fff; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; transform: translate(-50%, -100%); pointer-events: none; border: 1px solid #333; white-space: nowrap; }
+        .dim-tag { position: absolute; background: #fff; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; transform: translate(-50%, -100%); pointer-events: none; border: 1px solid #333; }
+        /* 入力欄を白くして目立たせ、入力しやすくする */
+        .dg .c input[type=text] { background: #eee !important; color: #000 !important; font-weight: bold !important; }
     </style>
 </head>
 <body>
     <div id="ui-panel">
         <strong>メザニンラック 3Dシミュレーター</strong><br>
-        幅(1-5)・奥行(1-9)のスパン番号で配置可能<br>
-        全高: H3900 / 柱間隔: 図面準拠
+        右側パネルの数値（白い欄）を直接書き換えてください
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -35,7 +36,7 @@
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.target.set(10000, 2000, -5000);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const light = new THREE.DirectionalLight(0xffffff, 0.5);
         light.position.set(10000, 10000, 5000);
         scene.add(light);
@@ -47,7 +48,6 @@
         const BEAM_H = 2540;
         const PIL_W = 125; 
 
-        // 奥行スパン定義 [1000, 1100, 1000, 1500, 1000, 1000, 1000, 1000, 1000]
         const spansZ = [1000, 1100, 1000, 1500, 1000, 1000, 1000, 1000, 1000];
         const zPositions = [0];
         let currentZ = 0;
@@ -82,22 +82,22 @@
 
         // --- カーテンシステム ---
         let curtains = [];
-        const gui = new dat.GUI();
+        const gui = new dat.GUI({ width: 320 });
         const globalActions = {
-            '＋ カーテンを追加': () => addCurtain(),
-            '現在の状態を保存': () => saveState(),
-            '保存した状態を読み込む': () => loadState()
+            '＋ 新しいカーテンを追加': () => addCurtain(),
+            '現在の配置を保存': () => saveState(),
+            '保存データを読み込み': () => loadState()
         };
-        gui.add(globalActions, '＋ カーテンを追加');
-        gui.add(globalActions, '現在の状態を保存');
-        gui.add(globalActions, '保存した状態を読み込む');
+        gui.add(globalActions, '＋ 新しいカーテンを追加');
+        gui.add(globalActions, '現在の配置を保存');
+        gui.add(globalActions, '保存データを読み込み');
 
         function addCurtain(initData = null) {
             const id = Date.now() + Math.random(); 
             const data = initData || {
-                w: 3900, h: 2540, x: 2000, y: 0, z: 50, 
+                w: 3900, h: 2540, x: 2000, y: 0, z: 0, 
                 rotate: false, color: '#ffcc00', opacity: 0.7,
-                snapToSpan: true, spanIndexX: 1, spanIndexZ: 1
+                snapToSpan: true, spanX: 1, spanZ: 1
             };
 
             const group = new THREE.Group();
@@ -113,21 +113,34 @@
             tag.className = 'dim-tag';
             document.body.appendChild(tag);
 
-            const folder = gui.addFolder('カーテン ' + (curtains.length + 1));
+            const folder = gui.addFolder('カーテン設定 ' + (curtains.length + 1));
             const item = { id, group, mesh, bar, data, tag, folder };
 
-            folder.add(data, 'snapToSpan').name('スパンに合わせる').onChange(() => update(item));
-            folder.add(data, 'rotate').name('左右向きにする').onChange(() => update(item));
+            // 数値入力用のコントローラーを作成
+            const ctrlW = folder.add(data, 'w', 0, 20000).name('幅(W)');
+            const ctrlH = folder.add(data, 'h', 0, 5000).name('高さ(H)');
+            const ctrlX = folder.add(data, 'x', -5000, 25000).name('位置(X)');
+            const ctrlZ = folder.add(data, 'z', -20000, 5000).name('位置(Z)');
+            const ctrlY = folder.add(data, 'y', 0, 3000).name('床から(Y)');
             
-            folder.add(data, 'spanIndexX', { '1番': 1, '2番': 2, '3番': 3, '4番': 4, '5番': 5 }).name('幅方向スパン').onChange(() => update(item));
-            folder.add(data, 'spanIndexZ', { '1番': 1, '2番': 2, '3番': 3, '4番': 4, '5番': 5, '6番': 6, '7番': 7, '8番': 8, '9番': 9 }).name('奥行スパン').onChange(() => update(item));
+            // 変更があったら自動配置をオフにする（YとH以外）
+            const disableSnap = () => { data.snapToSpan = false; update(item); };
+            ctrlW.onChange(disableSnap);
+            ctrlX.onChange(disableSnap);
+            ctrlZ.onChange(disableSnap);
+            ctrlH.onChange(() => update(item));
+            ctrlY.onChange(() => update(item));
+
+            folder.add(data, 'opacity', 0.1, 1.0).name('不透明度').onChange(() => update(item));
+            folder.addColor(data, 'color').name('カーテン色').onChange(() => update(item));
             
-            folder.add(data, 'w', 100, 10000).name('幅(W)手動').listen().onChange(() => { data.snapToSpan = false; update(item); });
-            folder.add(data, 'x', -2000, WIDTH_X + 2000).name('左右(X)手動').listen().onChange(() => { data.snapToSpan = false; update(item); });
-            folder.add(data, 'z', -MAX_DEPTH - 1000, 1000).name('前後(Z)手動').listen().onChange(() => { data.snapToSpan = false; update(item); });
-            
-            folder.add(data, 'h', 100, HEIGHT_Y).name('高さ(H)').onChange(() => update(item));
-            folder.addColor(data, 'color').name('色').onChange(() => update(item));
+            // スパン補助
+            const sub = folder.addFolder('自動配置アシスト');
+            sub.add(data, 'snapToSpan').name('スパンに吸着させる').listen().onChange(() => update(item));
+            sub.add(data, 'rotate').name('左右向き(奥行面)').onChange(() => update(item));
+            sub.add(data, 'spanX', { '1番': 1, '2番': 2, '3番': 3, '4番': 4, '5番': 5 }).name('幅スパン番号').onChange(() => update(item));
+            sub.add(data, 'spanZ', { '1番': 1, '2番': 2, '3番': 3, '4番': 4, '5番': 5, '6番': 6, '7番': 7, '8番': 8, '9番': 9 }).name('奥行スパン番号').onChange(() => update(item));
+
             folder.add({ delete: () => removeCurtain(item) }, 'delete').name('❌ このカーテンを削除');
             folder.open();
 
@@ -137,16 +150,14 @@
 
         function update(item) {
             if (item.data.snapToSpan) {
-                const idxX = parseInt(item.data.spanIndexX) - 1;
-                const idxZ = parseInt(item.data.spanIndexZ) - 1;
+                const idxX = parseInt(item.data.spanX) - 1;
+                const idxZ = parseInt(item.data.spanZ) - 1;
 
                 if (!item.data.rotate) {
-                    // 正面向き：幅スパンにはまる
                     item.data.w = SPAN_X - 100;
                     item.data.x = (idxX * SPAN_X) + (SPAN_X / 2);
                     item.data.z = zPositions[idxZ]; 
                 } else {
-                    // 左右向き：奥行スパンにはまる
                     const currentSpanZ = spansZ[idxZ];
                     item.data.w = currentSpanZ - 50;
                     item.data.z = zPositions[idxZ] - (currentSpanZ / 2) - (PIL_W / 2);
@@ -157,14 +168,19 @@
             item.mesh.scale.set(item.data.w, item.data.h, 1);
             item.mesh.position.y = item.data.h / 2;
             item.mesh.material.color.set(item.data.color);
+            item.mesh.material.opacity = item.data.opacity;
+            
             item.bar.scale.set(1, item.data.w, 1);
             item.bar.position.y = item.data.h;
             item.group.rotation.y = item.data.rotate ? Math.PI / 2 : 0;
             item.group.position.set(item.data.x, item.data.y, item.data.z);
             
-            const dir = item.data.rotate ? "奥行" : "幅";
-            const num = item.data.rotate ? item.data.spanIndexZ : item.data.spanIndexX;
-            item.tag.innerHTML = `${dir}${num}番 (W:${Math.round(item.data.w)})`;
+            item.tag.innerHTML = `W:${Math.round(item.data.w)} H:${Math.round(item.data.h)}`;
+            
+            // GUI上の表示を強制更新（手打ち数値を反映させるため）
+            for (let i in item.folder.__controllers) {
+                item.folder.__controllers[i].updateDisplay();
+            }
         }
 
         function removeCurtain(item) {
@@ -175,12 +191,12 @@
         }
 
         function saveState() {
-            localStorage.setItem('mezzanine_rack_v6', JSON.stringify(curtains.map(c => c.data)));
+            localStorage.setItem('mezzanine_rack_v9', JSON.stringify(curtains.map(c => c.data)));
             alert('保存しました');
         }
 
         function loadState() {
-            const saved = localStorage.getItem('mezzanine_rack_v6');
+            const saved = localStorage.getItem('mezzanine_rack_v9');
             if (!saved) return alert('データなし');
             [...curtains].forEach(c => removeCurtain(c));
             JSON.parse(saved).forEach(data => addCurtain(data));
