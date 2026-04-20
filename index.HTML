@@ -2,18 +2,18 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>3D Rack Simulator - Full Span Snap Version</title>
+    <title>3D Rack Simulator - Final Display Version</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; }
         #ui-panel { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 8px; border-left: 5px solid #00ffcc; z-index: 100; pointer-events: none; }
-        .dim-tag { position: absolute; background: #fff; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; transform: translate(-50%, -100%); pointer-events: none; border: 1px solid #333; white-space: nowrap; }
+        .dim-tag { position: absolute; background: #fff; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; transform: translate(-50%, -100%); pointer-events: none; border: 1px solid #333; white-space: nowrap; box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
     </style>
 </head>
 <body>
     <div id="ui-panel">
         <strong>メザニンラック 3Dシミュレーター</strong><br>
-        幅(1-5)・奥行(1-9)のスパン番号で配置可能<br>
-        全高: H3900 / 柱間隔: 図面準拠
+        全高: H3900 / 各スパン寸法自動計算<br>
+        <small>カーテンごとに透過度の調整が可能です</small>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -47,7 +47,6 @@
         const BEAM_H = 2540;
         const PIL_W = 125; 
 
-        // 奥行スパン定義 [1000, 1100, 1000, 1500, 1000, 1000, 1000, 1000, 1000]
         const spansZ = [1000, 1100, 1000, 1500, 1000, 1000, 1000, 1000, 1000];
         const zPositions = [0];
         let currentZ = 0;
@@ -116,18 +115,19 @@
             const folder = gui.addFolder('カーテン ' + (curtains.length + 1));
             const item = { id, group, mesh, bar, data, tag, folder };
 
-            folder.add(data, 'snapToSpan').name('スパンに合わせる').onChange(() => update(item));
-            folder.add(data, 'rotate').name('左右向きにする').onChange(() => update(item));
-            
+            folder.add(data, 'snapToSpan').name('スパンに固定').onChange(() => update(item));
+            folder.add(data, 'rotate').name('左右向き(奥行)にする').onChange(() => update(item));
             folder.add(data, 'spanIndexX', { '1番': 1, '2番': 2, '3番': 3, '4番': 4, '5番': 5 }).name('幅方向スパン').onChange(() => update(item));
             folder.add(data, 'spanIndexZ', { '1番': 1, '2番': 2, '3番': 3, '4番': 4, '5番': 5, '6番': 6, '7番': 7, '8番': 8, '9番': 9 }).name('奥行スパン').onChange(() => update(item));
             
             folder.add(data, 'w', 100, 10000).name('幅(W)手動').listen().onChange(() => { data.snapToSpan = false; update(item); });
-            folder.add(data, 'x', -2000, WIDTH_X + 2000).name('左右(X)手動').listen().onChange(() => { data.snapToSpan = false; update(item); });
-            folder.add(data, 'z', -MAX_DEPTH - 1000, 1000).name('前後(Z)手動').listen().onChange(() => { data.snapToSpan = false; update(item); });
-            
-            folder.add(data, 'h', 100, HEIGHT_Y).name('高さ(H)').onChange(() => update(item));
+            folder.add(data, 'h', 100, HEIGHT_Y).name('高さ(H)手動').listen().onChange(() => update(item));
+            folder.add(data, 'opacity', 0.1, 1.0).name('透過調整(不透明度)').onChange(() => update(item));
             folder.addColor(data, 'color').name('色').onChange(() => update(item));
+            
+            folder.add(data, 'x', -2000, WIDTH_X + 2000).name('左右位置(X)').listen().onChange(() => { data.snapToSpan = false; update(item); });
+            folder.add(data, 'z', -MAX_DEPTH - 1000, 1000).name('前後位置(Z)').listen().onChange(() => { data.snapToSpan = false; update(item); });
+            
             folder.add({ delete: () => removeCurtain(item) }, 'delete').name('❌ このカーテンを削除');
             folder.open();
 
@@ -141,12 +141,10 @@
                 const idxZ = parseInt(item.data.spanIndexZ) - 1;
 
                 if (!item.data.rotate) {
-                    // 正面向き：幅スパンにはまる
                     item.data.w = SPAN_X - 100;
                     item.data.x = (idxX * SPAN_X) + (SPAN_X / 2);
                     item.data.z = zPositions[idxZ]; 
                 } else {
-                    // 左右向き：奥行スパンにはまる
                     const currentSpanZ = spansZ[idxZ];
                     item.data.w = currentSpanZ - 50;
                     item.data.z = zPositions[idxZ] - (currentSpanZ / 2) - (PIL_W / 2);
@@ -157,14 +155,15 @@
             item.mesh.scale.set(item.data.w, item.data.h, 1);
             item.mesh.position.y = item.data.h / 2;
             item.mesh.material.color.set(item.data.color);
+            item.mesh.material.opacity = item.data.opacity; // 透過反映
+            
             item.bar.scale.set(1, item.data.w, 1);
             item.bar.position.y = item.data.h;
             item.group.rotation.y = item.data.rotate ? Math.PI / 2 : 0;
             item.group.position.set(item.data.x, item.data.y, item.data.z);
             
-            const dir = item.data.rotate ? "奥行" : "幅";
-            const num = item.data.rotate ? item.data.spanIndexZ : item.data.spanIndexX;
-            item.tag.innerHTML = `${dir}${num}番 (W:${Math.round(item.data.w)})`;
+            const label = item.data.rotate ? `奥行${item.data.spanIndexZ}番` : `幅${item.data.spanIndexX}番`;
+            item.tag.innerHTML = `${label} / W:${Math.round(item.data.w)} H:${Math.round(item.data.h)}`;
         }
 
         function removeCurtain(item) {
@@ -175,12 +174,12 @@
         }
 
         function saveState() {
-            localStorage.setItem('mezzanine_rack_v6', JSON.stringify(curtains.map(c => c.data)));
+            localStorage.setItem('mezzanine_rack_v7', JSON.stringify(curtains.map(c => c.data)));
             alert('保存しました');
         }
 
         function loadState() {
-            const saved = localStorage.getItem('mezzanine_rack_v6');
+            const saved = localStorage.getItem('mezzanine_rack_v7');
             if (!saved) return alert('データなし');
             [...curtains].forEach(c => removeCurtain(c));
             JSON.parse(saved).forEach(data => addCurtain(data));
